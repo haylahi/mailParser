@@ -15,34 +15,19 @@ from collections import namedtuple
 _logger = logging.getLogger(__name__)
 
 MODELS_FIELDS_MAPPING = (
-    ('name', 'firstname', 'str'),
-    # ('lastname', 'lastname', 'str'),
+    ('name', 'name', 'str'),
     ('company-name', 'company_name', 'str'),
     ('email', 'email', 'str'),
     ('phone', 'mobile', 'str'),
-    # ('country', 'country_id', 'm2o'),
-    # ('infosource', 'hdyhear', 'str'),
-    # ('partner-describtion', 'partner_description', 'str'),  # if Other - R+D
-    # ('client-type', 'contact_type', 'contact_type'),
-    ('Message', 'form_comments', 'str'),
-    # ('describe', 'intended_use', 'str'),
-    # ('other2', 'details', 'str'),
-    # ('message2', 'form_comments', 'str'),
-    # ('rentalflag ', 'rent_for_one', 'bool'),
-    # ('message3', 'form_comments', 'str'),
-    # ('Eventsagencyflag', 'event_partner_interest', 'bool'),
-    # ('Eventsagencyoravcompany', 'events_agency', 'bool'),
-    # ('b-id', 'b_id', 'str'),
-    # ('p-id', 'linktopq', 'str'),
-    # ('token', 'linktopq', 'str'),
+    ('Message', 'message', 'str'),
 )
 
 MODELS_FIELDS_SURVEY_MAPPING = (
-    ('name', 'firstname', 'str'),
+    ('name', 'name', 'str'),
     ('company-name', 'company_name', 'str'),
     ('email', 'email', 'str'),
     ('phone', 'mobile', 'str'),
-    ('Message', 'form_comments', 'str'),
+    ('Message', 'message', 'str'),
 )
 
 
@@ -197,7 +182,7 @@ class EmailParser(models.AbstractModel):
 
 class EmailSurvey(models.TransientModel):
     _name = 'mail.survey_model'
-    # _inherit = ['mail.thread', 'mail.alias.mixin', 'mail.survey_parser']
+    _inherit = ['mail.thread', 'mail.alias.mixin', 'mail.survey_parser']
     _description = 'Form Message Parser'
     _mail_post_access = 'read'
 
@@ -206,22 +191,14 @@ class EmailSurvey(models.TransientModel):
         try:
             _logger.info("Creation lead for {}".format(partner.email))
             opportunity_data = {
-                'name': '|'.join(
-                    [
-                        'QUESTIONNAIRE',
-                        msg_data.get('company_name', ''),
-                        self.env['res.country'].browse(
-                            [int(msg_data.get('country_id', 0))]
-                        ).name
-                    ]
-                ),
+                'name': msg_data['Message'],
                 # 'email_from': tools.email_split(self.email_from)[0],
                 'team_id': False,
                 'description': 'Created from questionnaire form',
                 'partner_id': partner.id,
                 'partner_name': partner.name,
             }
-            lead = self.env['crm.lead'].create(opportunity_data)
+            self.env['crm.lead'].create(opportunity_data)
         except:
             _logger.exception(
                 "Lead creation for {} failed.".format(partner.email)
@@ -247,7 +224,7 @@ class EmailSurvey(models.TransientModel):
            Если у партнера другие емейл и что либо из (имя-фамилия), мы создаем нового партнера типа компания, 
            где имя=имя компании из опросника, найденного для найденного по коду акнеты ставим parent_id эту новую компанию,
            а уже текущий опросник создаем для нового, где parent_id также новый этот самый партнер.
-        
+
         """
 
         # to_alias_name = tools.email_split(msg_dict.get('to'))[0].split('@', 1)[0]
@@ -259,9 +236,12 @@ class EmailSurvey(models.TransientModel):
         if not FIELDS_MAPPING or not TARGET_MODEL:
             _logger.error('No mapping fields for message {}'.format(msg_dict))
             return
-        write_dict = self.parse_msg_body(
-            msg_dict.get('body'), FIELDS_MAPPING, TARGET_MODEL
-        )
+        # write_dict = self.parse_msg_body(
+        #     msg_dict.get('body'), FIELDS_MAPPING, TARGET_MODEL
+        # )
+        write_dict = self._parse_mail_to_dict(msg_dict.get('body'))
+
+        # print(write_dict)
 
         _logger.info("Survey mail data:\n{}\n".format(write_dict))
 
@@ -320,20 +300,17 @@ class EmailSurvey(models.TransientModel):
             )
             if partners:
                 m_firstname = write_dict.get('firstname', None)
-                m_lastname = write_dict.get('lastname', None)
                 m_company = write_dict.get('company_name', None)
 
                 if not all(
                         (
                                 partners.firstname,
-                                partners.lastname
                         )
                 ):
                     pass
                 elif all(
                         (
                                 partners.firstname == m_firstname,
-                                partners.lastname == m_lastname,
                                 partners.email == email_to_search
                         )
                 ):
@@ -341,7 +318,6 @@ class EmailSurvey(models.TransientModel):
                 elif all(
                         (
                                 partners.firstname == m_firstname,
-                                partners.lastname == m_lastname
                         )
                 ) and email_to_search:
                     write_dict.update(
@@ -389,7 +365,7 @@ class EmailSurvey(models.TransientModel):
             # currently subscribed users only.
 
         if write_dict:
-            if not 'firstname' in write_dict.keys() and not 'lastname' in write_dict.keys():
+            if not 'firstname' in write_dict.keys():
                 write_dict['firstname'] = email_to_search
             partners.write(write_dict)
             try:
@@ -397,15 +373,15 @@ class EmailSurvey(models.TransientModel):
             except Exception as e:
                 _logger.error('Error while writing survey message from %s' % email_to_search, [e])
 
-        lead = self.create_lead(partners, write_dict)
+        self.create_lead(partners, write_dict)
 
-        salesperson = self.env['hr.employee'].search([
-            ('rm_country_ids.name', '=ilike', write_dict.get('country', ''))
-        ])
-        if salesperson:
-            _logger.info("Found default buyers sales manager.")
-            lead.user_id = salesperson.user_id
-            partners.user_id = salesperson.user_id
+        # salesperson = self.env['hr.employee'].search([
+        #     ('rm_country_ids.name', '=ilike', write_dict.get('country', ''))
+        # ])
+        # if salesperson:
+        #     _logger.info("Found default buyers sales manager.")
+        #     lead.user_id = salesperson.user_id
+        #     partners.user_id = salesperson.user_id
 
         return partners
 

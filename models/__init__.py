@@ -2,3 +2,4 @@
 
 
 from . import mail_parser
+from . import res_partner
