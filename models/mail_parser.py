@@ -191,23 +191,31 @@ class EmailSurvey(models.TransientModel):
         try:
             _logger.info("Creation lead for {}".format(partner.email))
             opportunity_data = {
-                'name': msg_data['Message'],
+                'name': msg_data['message'],
                 # 'email_from': tools.email_split(self.email_from)[0],
                 'team_id': False,
                 'description': 'Created from questionnaire form',
                 'partner_id': partner.id,
-                'partner_name': partner.name,
+                'partner_name': msg_data['company-name'],
+                'email_from': msg_data['email'],
+                'phone': msg_data['phone'],
             }
-            self.env['crm.lead'].create(opportunity_data)
+            leads = self.env['crm.lead'].search([])
+            if msg_data['message'] in leads.mapped('name'):
+                _logger.info("Lead {} already exists".format(
+                    opportunity_data['name']
+                ))
+            else:
+                self.env['crm.lead'].create(opportunity_data)
+                _logger.info("Lead {} for {} successfully created".format(
+                    opportunity_data['name'],
+                    partner.email
+                ))
         except:
             _logger.exception(
                 "Lead creation for {} failed.".format(partner.email)
             )
-        else:
-            _logger.info("Lead {} for {} successfully created".format(
-                opportunity_data['name'],
-                partner.email
-            ))
+
         return lead
 
     @api.model
@@ -241,7 +249,7 @@ class EmailSurvey(models.TransientModel):
         # )
         write_dict = self._parse_mail_to_dict(msg_dict.get('body'))
 
-        # print(write_dict)
+        write_dict_for_lead = dict(write_dict)
 
         _logger.info("Survey mail data:\n{}\n".format(write_dict))
 
@@ -299,8 +307,8 @@ class EmailSurvey(models.TransientModel):
                 [('linktopq', 'in', [write_dict.get('linktopq')])], limit=1
             )
             if partners:
-                m_firstname = write_dict.get('firstname', None)
-                m_company = write_dict.get('company_name', None)
+                m_firstname = write_dict.get('name', None)
+                m_company = write_dict.get('company-name', None)
 
                 if not all(
                         (
@@ -340,7 +348,7 @@ class EmailSurvey(models.TransientModel):
                     # we bind old record to parent company and create new
                     # partner_id for this questionare with the same parent_id
                     write_dict.update({'parent_id': parent_partner[0].id})
-                    self.create_lead(partners, write_dict)
+                    self.create_lead(partners, write_dict_for_lead)
                     partners = None
 
         if not partners:
@@ -373,7 +381,7 @@ class EmailSurvey(models.TransientModel):
             except Exception as e:
                 _logger.error('Error while writing survey message from %s' % email_to_search, [e])
 
-        self.create_lead(partners, write_dict)
+        self.create_lead(partners, write_dict_for_lead)
 
         # salesperson = self.env['hr.employee'].search([
         #     ('rm_country_ids.name', '=ilike', write_dict.get('country', ''))
